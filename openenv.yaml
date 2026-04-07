@@ -1,0 +1,12 @@
+name: MedicalTriageEnv
+version: 1.0.0
+description: "Autonomous Medical Triage Simulation for OpenEnv Phase 1 validation."
+entrypoint: env:MedicalTriageEnv
+
+tasks:
+  - id: "0"
+    name: "Easy Task - Broken Wrist"
+  - id: "1"
+    name: "Medium Task - Internal Bleeding Trap"
+  - id: "2"
+    name: "Hard Task - Pulmonary Embolism Trap"
