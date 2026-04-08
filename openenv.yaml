@@ -1,12 +1,18 @@
 name: MedicalTriageEnv
 version: 1.0.0
-description: "Autonomous Medical Triage Simulation for OpenEnv Phase 1 validation."
+description: "Autonomous Medical Triage Simulation — AI agent diagnoses ER patients, stabilizes them, and routes to the correct specialist."
 entrypoint: env:MedicalTriageEnv
+
+observation: env:TriageObservation
+action: env:TriageAction
 
 tasks:
   - id: "0"
-    name: "Easy Task - Broken Wrist"
+    name: "Easy — Broken Wrist"
+    description: "Diagnose and triage a patient with an obvious wrist fracture to Orthopedics."
   - id: "1"
-    name: "Medium Task - Internal Bleeding Trap"
+    name: "Medium — Internal Bleeding Trap"
+    description: "Patient presents with stomach ache but vitals reveal internal bleeding. Must route to Emergency, not Gastroenterology."
   - id: "2"
-    name: "Hard Task - Pulmonary Embolism Trap"
+    name: "Hard — Pulmonary Embolism Trap"
+    description: "Patient mimics a panic attack but medical history reveals DVT — a pulmonary embolism. Must route to Cardiology, not Psychiatry."

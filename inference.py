@@ -1,66 +1,102 @@
+import asyncio
 import os
 import json
-import asyncio
-from openai import AsyncOpenAI
+import textwrap
+from typing import List, Optional
+
+from openai import OpenAI
+
 from env import (
     MedicalTriageEnv, GetVitalsAction, GetHistoryAction, AskPatientAction, 
     OrderLabImagingAction, AdministerMedicationAction, SubmitTriageAction
 )
 
-# Configuration (Defaults to Ollama local server)
-API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:11434/v1")
-MODEL_NAME = os.getenv("MODEL_NAME", "nemotron-mini")
-API_KEY = os.getenv("HF_TOKEN", "ollama")
+IMAGE_NAME = os.getenv("IMAGE_NAME") # If you are using docker image 
+API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "ollama"
 
+API_BASE_URL = os.getenv("API_BASE_URL") or "http://localhost:11434/v1"
+MODEL_NAME = os.getenv("MODEL_NAME") or "nemotron-mini:4b"
+TASK_NAME = os.getenv("MY_ENV_TASK", "Medical_Triage_Simulator")
+BENCHMARK = os.getenv("MY_ENV_BENCHMARK", "OpenEnv Realistic Eval")
 MAX_STEPS = 8
-TASK_NAME = "Medical_Triage_Simulator"
-BENCHMARK = "OpenEnv Realistic Eval"
-SUCCESS_SCORE_THRESHOLD = 0.8 
+TEMPERATURE = 0.0
+SUCCESS_SCORE_THRESHOLD = 0.8  # normalized score in [0, 1]
 
-# --- STRICT LOGGING FORMAT REQUIRED BY OPENENV HACKATHON ---
-def log_start(task: str, env: str, model: str):
-    print(f"[START] Task: {task} | Env: {env} | Model: {model}", flush=True)
 
-def log_step(step: int, action: str, reward: float, done: bool, error: str = None):
-    err_str = f" | Error: {error}" if error else ""
-    print(f"[STEP] Step: {step} | Action: {action} | Reward: {reward} | Done: {done}{err_str}", flush=True)
+SYSTEM_PROMPT = textwrap.dedent(
+    """
+    You are an expert autonomous Medical ER AI.
+    Review the patient's state and choose your next action carefully to diagnose and stabilize them before submitting triage. You MUST output ONLY raw JSON.
 
-def log_end(success: bool, steps: int, score: float, rewards: list):
-    print(f"[END] Success: {success} | Steps: {steps} | Score: {score} | Rewards: {rewards}", flush=True)
+    Action Space:
+    1. {"action_type": "get_vitals"}
+    2. {"action_type": "get_history"}
+    3. {"action_type": "ask_patient", "topic": "<what to ask about>"}
+    4. {"action_type": "order_lab_imaging", "test_type": "<test name e.g. CBC, X-Ray, CT Angiogram>"}
+    5. {"action_type": "administer_medication", "drug_name": "<drug e.g. IV Fluids, Heparin, Ibuprofen>"}
+    6. {"action_type": "submit_triage", "specialist": "<type>", "urgency": "<level>"}
+       (Ends the episode. Urgency: 'Avg' or 'Immediate'. Departments: Orthopedics, Emergency, Cardiology, etc.)
 
-async def get_model_action(client: AsyncOpenAI, obs_dump: dict, history_str: str) -> str:
-    prompt = f"""
-You are an expert autonomous Medical ER AI.
-Review the patient's state and choose your next action carefully to diagnose and stabilize them before submitting triage. You MUST output ONLY raw JSON.
+    Warning: Giving the wrong medication to a fragile patient will cause them to crash. Ensure you have the right labs or vitals before intervening.
+    """
+).strip()
 
-Action Space:
-1. {{"action_type": "get_vitals"}}
-2. {{"action_type": "get_history"}}
-3. {{"action_type": "ask_patient", "topic": "<what to ask about>"}}
-4. {{"action_type": "order_lab_imaging", "test_type": "<test name e.g. CBC, X-Ray, CT Angiogram>"}}
-5. {{"action_type": "administer_medication", "drug_name": "<drug e.g. IV Fluids, Heparin, Ibuprofen>"}}
-6. {{"action_type": "submit_triage", "specialist": "<type>", "urgency": "<level>"}}
-   (Ends the episode. Urgency: 'Avg' or 'Immediate'. Departments: Orthopedics, Emergency, Cardiology, etc.)
 
-Warning: Giving the wrong medication to a fragile patient will cause them to crash. Ensure you have the right labs or vitals before intervening.
+def log_start(task: str, env: str, model: str) -> None:
+    print(f"[START] task={task} env={env} model={model}", flush=True)
 
-Current Patient Observation:
-{json.dumps(obs_dump, indent=2)}
 
-History of your previous actions:
-{history_str if history_str else "No actions taken yet."}
+def log_step(step: int, action: str, reward: float, done: bool, error: Optional[str]) -> None:
+    error_val = error if error else "null"
+    done_val = str(done).lower()
+    # Ensure all fields on a single line with no newlines within a line
+    action_clean = action.replace('\n', '').replace('\r', '')
+    print(
+        f"[STEP] step={step} action={action_clean} reward={reward:.2f} done={done_val} error={error_val}",
+        flush=True,
+    )
 
-Output ONLY the JSON dictionary of the next action.
-"""
+
+def log_end(success: bool, steps: int, score: float, rewards: List[float]) -> None:
+    rewards_str = ",".join(f"{r:.2f}" for r in rewards)
+    print(f"[END] success={str(success).lower()} steps={steps} score={score:.3f} rewards={rewards_str}", flush=True)
+
+
+def build_user_prompt(step: int, obs_dump: dict, history: List[str]) -> str:
+    history_block = "\n".join(history[-4:]) if history else "No actions taken yet."
+    return textwrap.dedent(
+        f"""
+        Step: {step}
+        Current Patient Observation:
+        {json.dumps(obs_dump, indent=2)}
+
+        History of your previous actions:
+        {history_block}
+        
+        Output ONLY the JSON dictionary of the next action.
+        """
+    ).strip()
+
+
+def get_model_message(client: OpenAI, step: int, obs_dump: dict, history: List[str]) -> str:
+    user_prompt = build_user_prompt(step, obs_dump, history)
     try:
-        response = await client.chat.completions.create(
+        completion = client.chat.completions.create(
             model=MODEL_NAME,
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.0
+            messages=[
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": user_prompt},
+            ],
+            temperature=TEMPERATURE,
+            stream=False,
         )
-        text = response.choices[0].message.content.strip()
+        text = (completion.choices[0].message.content or "").strip()
+        
+        # Clean potential markdown fences
         if text.startswith("```json"):
             text = text[7:]
+        if text.startswith("```"):
+            text = text[3:]
         if text.endswith("```"):
             text = text[:-3]
         return text.strip()
@@ -68,29 +104,29 @@ Output ONLY the JSON dictionary of the next action.
         print(f"[DEBUG] Model request failed: {exc}", flush=True)
         return '{"action_type": "submit_triage", "specialist": "Error", "urgency": "Avg"}'
 
+
 async def main() -> None:
-    client = AsyncOpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+
     env = MedicalTriageEnv()
-    
-    # Iterate dynamically through all 3 tasks (Easy, Medium, Hard) to log variance
+
+    # Iterate over all 3 tasks (Easy, Medium, Hard) to properly log behavior variance
     for task_idx in range(3):
-        task_name = f"{TASK_NAME}_Task_{task_idx}"
-        log_start(task=task_name, env=BENCHMARK, model=MODEL_NAME)
-        
-        history = []
-        rewards = []
+        history: List[str] = []
+        rewards: List[float] = []
         steps_taken = 0
-        done = False
+        score = 0.0
+        success = False
         
-        obs = env.reset(task_idx=task_idx)
-        
+        task_specific_name = f"{TASK_NAME}_Task_{task_idx}"
+        log_start(task=task_specific_name, env=BENCHMARK, model=MODEL_NAME)
+
         try:
+            obs = env.reset(task_idx=task_idx)
+            
             for step in range(1, MAX_STEPS + 1):
-                if done: break
-                
                 obs_dump = obs.model_dump()
-                history_str = "\n".join(history)
-                action_json_str = await get_model_action(client, obs_dump, history_str)
+                action_json_str = get_model_message(client, step, obs_dump, history)
                 
                 try:
                     action_dict = json.loads(action_json_str)
@@ -121,20 +157,24 @@ async def main() -> None:
                     reward = -0.1
                     error = str(e)
                     done = False
-                    
+                
                 rewards.append(reward)
                 steps_taken = step
+                
                 log_step(step=step, action=action_json_str, reward=reward, done=done, error=error)
                 history.append(f"Step {step}: {action_json_str} -> reward {reward:+.2f}")
-                
+
+                if done:
+                    break
+
+            # Hackathon requirement: Each task should return score in [0, 1]
             score = sum(rewards)
             score = min(max(score, 0.0), 1.0)
             success = score >= SUCCESS_SCORE_THRESHOLD
-            
+
         finally:
             log_end(success=success, steps=steps_taken, score=score, rewards=rewards)
-        
-        print("\n" + "="*50 + "\n", flush=True)
+
 
 if __name__ == "__main__":
     asyncio.run(main())

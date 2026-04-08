@@ -12,7 +12,6 @@ except ImportError:
 # 1. Pydantic Space Definitions
 # ==========================================
 
-# Observation Space
 class TriageObservation(BaseModel):
     """The state returned to the agent at every step."""
     patient_complaint: str = Field(description="Initial patient complaint text.")
@@ -22,7 +21,6 @@ class TriageObservation(BaseModel):
     lab_results: Optional[str] = Field(default=None, description="Results of ordered labs/imaging.")
     system_message: str = Field(description="Provides feedback from the environment.")
 
-# Action Space Definitions
 class GetVitalsAction(BaseModel):
     action_type: Literal["get_vitals"]
 
@@ -71,21 +69,21 @@ class MedicalTriageEnv(BaseEnv):
                 "optimal_meds": ["painkiller", "advil", "ibuprofen"],
                 "harmful_meds": [],
                 "optimal_specialist": "orthopedics",
-                "optimal_urgency": "avg",
+                "optimal_urgency": "avg"
             },
-            1: { # MEDIUM - Internal Bleeding Trap
+            1: { # MEDIUM - Heart attack (STEMI) trap
                 "difficulty": "medium",
-                "complaint": "I've had a really bad stomach ache and feel dizzy.",
-                "vitals": "HR 130 (Tachycardia), BP 80/50 (Hypotension), O2 98%",
-                "history": "None relevant",
-                "optimal_labs": {"cbc": "Hemoglobin critically low at 6.5 g/dL."},
-                "optimal_meds": ["iv fluids", "blood transfusion"],
-                "harmful_meds": ["ibuprofen", "advil", "nsaid"], # Worsens bleeding
-                "optimal_specialist": "emergency",
+                "complaint": "I have heartburn, a bitter taste in my mouth, and mild chest discomfort after eating spicy food.",
+                "vitals": "HR 110, BP 90/60, O2 97%",
+                "history": "History of mild heartburn issues.",
+                "optimal_labs": {"ekg": "ST-elevation in inferior leads. STEMI confirmed.", "ecg": "ST-elevation in inferior leads. STEMI confirmed."},
+                "optimal_meds": ["aspirin", "nitroglycerin", "heparin"],
+                "harmful_meds": ["antacid", "tums", "omeprazole"], # Worsens outcomes due to delay in STEMI
+                "optimal_specialist": "cardiology",
                 "optimal_urgency": "immediate",
                 "trap_specialist": "gastroenterology"
             },
-            2: { # HARD - Pulmonary Embolism
+            2: { # HARD - Pulmonary Embolism trap
                 "difficulty": "hard",
                 "complaint": "I'm having a severe panic attack. I can't breathe, my chest is tight, and I feel a sense of doom.",
                 "vitals": "HR 110, BP 130/85, O2 98%",
@@ -110,6 +108,12 @@ class MedicalTriageEnv(BaseEnv):
         self.accumulated_reward = 0.0
         self.patient_status = "Deteriorating" if task_idx > 0 else "Stable"
         
+        # State tracking to prevent reward farming
+        self.ordered_labs = set()
+        self.given_meds = set()
+        self.asked_topics = set()
+        self.num_steps = 0
+        
         return self._get_obs("Patient arrived.")
 
     def state(self) -> TriageObservation:
@@ -126,6 +130,7 @@ class MedicalTriageEnv(BaseEnv):
         )
 
     def step(self, action: TriageAction) -> Tuple[TriageObservation, float, bool, Dict[str, Any]]:
+        self.num_steps += 1
         reward = 0.0
         done = False
         system_message = ""
@@ -149,19 +154,32 @@ class MedicalTriageEnv(BaseEnv):
                 system_message = "History already checked."
 
         elif action.action_type == "ask_patient":
-            # Just providing minimal interaction
-            system_message = f"Patient responds vaguely about '{action.topic}'."
-            reward = 0.05
+            topic = action.topic.lower()
+            if topic not in self.asked_topics:
+                self.asked_topics.add(topic)
+                system_message = f"Patient responds vaguely about '{action.topic}'."
+                reward = 0.05
+            else:
+                reward = -0.05
+                system_message = "Already asked patient about this. Redundant."
 
         elif action.action_type == "order_lab_imaging":
             test = action.test_type.lower()
             matched = False
+            
             for optimal_test, result in self.current_task["optimal_labs"].items():
                 if optimal_test in test:
-                    self.labs_known += f"[{test}]: {result}\n"
-                    reward = 0.15
-                    system_message = f"Lab results ready for {action.test_type}."
-                    matched = True
+                    if optimal_test not in self.ordered_labs:
+                        self.ordered_labs.add(optimal_test)
+                        self.labs_known += f"[{test}]: {result}\n"
+                        reward = 0.15
+                        system_message = f"Lab results ready for {action.test_type}."
+                        matched = True
+                    else:
+                        reward = -0.05
+                        system_message = f"Already ordered {action.test_type}. Wasted time."
+                        matched = True
+            
             if not matched:
                 reward = -0.05
                 system_message = f"Ordered {action.test_type}. Results unremarkable. Wasted time."
@@ -173,9 +191,14 @@ class MedicalTriageEnv(BaseEnv):
                 reward = -0.4
                 system_message = f"CRITICAL: {action.drug_name} worsened the condition! Patient crashing."
             elif any(o in drug for o in self.current_task["optimal_meds"]):
-                self.patient_status = "Stable"
-                reward = 0.2
-                system_message = f"{action.drug_name} administered. Patient stabilizing."
+                if drug not in self.given_meds:
+                    self.given_meds.add(drug)
+                    self.patient_status = "Stable"
+                    reward = 0.2
+                    system_message = f"{action.drug_name} administered. Patient stabilizing."
+                else:
+                    reward = -0.05
+                    system_message = f"{action.drug_name} already administered. Wasted resources."
             else:
                 reward = -0.05
                 system_message = f"{action.drug_name} administered. No notable effect. Wasted resources."
@@ -184,25 +207,28 @@ class MedicalTriageEnv(BaseEnv):
             done = True
             pred_spec = action.specialist.lower()
             opt_spec = self.current_task["optimal_specialist"]
+            step_penalty = 0.02 * self.num_steps
 
-            # Cap the max reward to ensure total does not exceed 1.0 if perfectly solved
             if pred_spec == opt_spec:
-                rem_needed = 1.0 - self.accumulated_reward
+                rem_needed = (1.0 - step_penalty) - self.accumulated_reward
                 reward = max(0.0, float(rem_needed))
-                system_message = f"Triage submitted perfectly to {opt_spec}."
+                system_message = f"Triage submitted perfectly to {opt_spec}. (Efficiency penalty applied)"
             else:
-                # Realistic Partial Traps scoring based on the Baseline LLM behaviors
                 trap_spec = self.current_task.get("trap_specialist", "")
                 if trap_spec and trap_spec in pred_spec:
                     if self.current_task["difficulty"] == "medium":
-                        reward = 0.3 # Guessed Gastro for stomach ache
-                        system_message = "Triage submitted to Gastro. Missed internal bleeding!"
+                        reward = max(0.0, 0.6 - step_penalty)
+                        system_message = "Triage submitted to Gastro. Missed Heart Attack!"
                     elif self.current_task["difficulty"] == "hard":
-                        reward = 0.1 # Guessed Psych for panic attack
+                        reward = max(0.0, 0.1 - step_penalty)
                         system_message = "Triage submitted to Psych. Missed Pulmonary Embolism!"
                 else:
-                    reward = 0.0
-                    system_message = f"Incorrect Triage. Expected {opt_spec}."
+                    if self.current_task["difficulty"] == "medium":
+                        reward = max(0.0, 0.4 - step_penalty)
+                        system_message = f"Sub-optimal triage. Expected {opt_spec}."
+                    else:
+                        reward = 0.0
+                        system_message = f"Incorrect Triage. Expected {opt_spec}."
 
         self.accumulated_reward += reward
 
