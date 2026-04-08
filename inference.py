@@ -11,13 +11,14 @@ from env import (
     OrderLabImagingAction, AdministerMedicationAction, SubmitTriageAction
 )
 
-IMAGE_NAME = os.getenv("IMAGE_NAME") # If you are using docker image 
-API_KEY = os.getenv("HF_TOKEN") or os.getenv("API_KEY") or "ollama"
+# Optional - if you use from_docker_image():
+LOCAL_IMAGE_NAME = os.getenv("LOCAL_IMAGE_NAME")
 
-API_BASE_URL = os.getenv("API_BASE_URL") or "http://localhost:11434/v1"
-MODEL_NAME = os.getenv("MODEL_NAME") or "nemotron-mini:4b"
-TASK_NAME = os.getenv("MY_ENV_TASK", "Medical_Triage_Simulator")
-BENCHMARK = os.getenv("MY_ENV_BENCHMARK", "OpenEnv Realistic Eval")
+API_BASE_URL = os.getenv("API_BASE_URL", "http://localhost:11434/v1")
+MODEL_NAME = os.getenv("MODEL_NAME", "nemotron-mini:4b")
+HF_TOKEN = os.getenv("HF_TOKEN")
+TASK_NAME = "Medical_Triage_Simulator"
+BENCHMARK = "OpenEnv Realistic Eval"
 MAX_STEPS = 8
 TEMPERATURE = 0.0
 SUCCESS_SCORE_THRESHOLD = 0.8  # normalized score in [0, 1]
@@ -106,7 +107,7 @@ def get_model_message(client: OpenAI, step: int, obs_dump: dict, history: List[s
 
 
 async def main() -> None:
-    client = OpenAI(base_url=API_BASE_URL, api_key=API_KEY)
+    client = OpenAI(base_url=API_BASE_URL, api_key=HF_TOKEN)
 
     env = MedicalTriageEnv()
 
