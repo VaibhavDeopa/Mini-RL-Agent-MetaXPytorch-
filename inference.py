@@ -170,7 +170,7 @@ async def main() -> None:
 
             # Hackathon requirement: Each task should return score in [0, 1]
             score = sum(rewards)
-            score = min(max(score, 0.0), 1.0)
+            score = min(max(score, 0.01), 0.99)
             success = score >= SUCCESS_SCORE_THRESHOLD
 
         finally:
