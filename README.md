@@ -1,6 +1,6 @@
-# 🏥 MedicalTriageEnv — OpenEnv Medical Triage Simulator
+#  MedicalTriageEnv — OpenEnv Medical Triage Simulator
 
-An autonomous medical triage simulation environment built for the **Meta × PyTorch Hackathon (Round 1)**. An AI agent plays as an Emergency Room physician who must diagnose patients, stabilize them, and route them to the correct specialist — all under time pressure and with realistic clinical traps.
+An autonomous medical triage simulation environment built for the **Meta × PyTorch Hackathon (Round 1)**. An AI agent plays as an Emergency Room physician who must diagnose patients, stabilize them, predict emergency and route them to the correct specialist — all under time pressure and with realistic clinical traps.
 
 ## Motivation
 
@@ -14,7 +14,7 @@ Medical triage is a **real-world, high-stakes task** that humans perform daily i
 
 ## Action Space
 
-The agent can choose from **6 typed actions** per step:
+The agent can choose from **6 typed actions/tools** per step:
 
 | Action | JSON Schema | Description |
 |--------|-------------|-------------|
@@ -44,12 +44,12 @@ Each step returns a `TriageObservation` with these fields:
 
 ## Tasks (Easy → Medium → Hard)
 
-### Task 0 — Easy: Broken Wrist 🦴
+### Task 0 — Easy: Broken Wrist 
 - **Complaint:** "My wrist is swollen, purple, and hurts"
 - **Optimal path:** Get vitals → Order X-Ray → Administer painkiller → Submit to Orthopedics (Avg)
 - **Expected difficulty:** Straightforward physical injury
 
-### Task 1 — Medium: Internal Bleeding Trap 🩸
+### Task 1 — Medium: Internal Bleeding Trap 
 - **Complaint:** "Really bad stomach ache and feel dizzy"
 - **Trap:** Sounds like gastro, but vitals reveal tachycardia + hypotension (internal bleeding)
 - **Optimal path:** Get vitals → Order CBC → Administer IV Fluids → Submit to Emergency (Immediate)
@@ -84,7 +84,7 @@ Rewards are **dense** (signal at every step) and **capped at 1.0** per episode.
 
 ### Prerequisites
 - Python 3.10+
-- [Ollama](https://ollama.com) (for local LLM testing)
+- [Ollama](https://ollama.com) (Nemotron 3 mini for local LLM testing)
 - Docker (for containerized deployment)
 
 ### Install Dependencies
@@ -132,18 +132,6 @@ openenv validate
 
 ---
 
-## Project Structure
-
-```
-├── env.py            # MedicalTriageEnv — core environment logic
-├── inference.py      # Baseline agent using OpenAI API client
-├── openenv.yaml      # OpenEnv metadata and task definitions
-├── Dockerfile        # Containerized deployment
-├── requirements.txt  # Python dependencies
-└── README.md         # This file
-```
-
----
 
 ## Environment Variables
 
