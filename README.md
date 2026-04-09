@@ -55,7 +55,7 @@ Each step returns a `TriageObservation` with these fields:
 - **Optimal path:** Get vitals → Order CBC → Administer IV Fluids → Submit to Emergency (Immediate)
 - **Danger:** Giving NSAIDs (Ibuprofen) **worsens bleeding** → heavy penalty
 
-### Task 2 — Hard: Pulmonary Embolism Disguised as Panic Attack 🫁
+### Task 2 — Hard: Pulmonary Embolism Disguised as Panic Attack 
 - **Complaint:** "Severe panic attack, can't breathe, chest tight, sense of doom"
 - **Trap:** Mimics psychiatric crisis perfectly. Vitals look borderline normal. But medical history reveals **DVT (blood clots)** → Pulmonary Embolism
 - **Optimal path:** Get vitals → Get history → Order CT Angiogram → Administer Heparin → Submit to Cardiology (Immediate)
